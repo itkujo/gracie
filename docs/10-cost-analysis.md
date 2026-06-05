@@ -45,15 +45,16 @@ You pay these whether cloud or self-hosted. Needed for the client cost model.
 
 | Service | Cost driver | Est. cost/mo |
 | --- | --- | --- |
-| **Recall.ai** ⚠️ | Per-meeting bot + recording hours | **$100–400+** — often the largest line |
+| **Recall.ai** | Per recording hour (~84 hrs/mo actual) | **~$42–84/mo** — see Otter→Recall section; cheaper than current Otter |
 | **OpenAI API** | 6 docs × meetings + chat + embeddings | **$30–150** (scales with meeting volume) |
 | **Resend** | Email volume (low) | $0–20 |
 | **Microsoft Graph** | Included in existing M365 licenses | $0 extra |
 | **Domain / Cloudflare** | DNS + Tunnel | $0–20 |
 | **Subtotal** | | **~$130–590/mo** |
 
-> ⚠️ **Recall.ai is the variable to watch** — usage-priced per meeting/recording hour,
-> frequently the single biggest recurring cost. Confirm current plan pricing.
+> ✅ **Recall.ai is cheaper than current Otter for GA's actual usage** (~84 hrs/mo,
+> concentrated in one user; 10 of 14 Otter seats idle). See the Otter→Recall section
+> below. Still confirm Recall's per-hour rate + any monthly minimum.
 
 ---
 
@@ -86,10 +87,67 @@ AI provider interface — add lightweight usage reporting (Phase 9/10) to make t
 
 ---
 
+## Otter.ai → Recall.ai comparison (from real usage data)
+
+> Source: `Otter-Teams-Usage` export (June 2026). Replaces the per-seat Otter
+> transcription cost with Recall.ai's usage-based model.
+
+### Actual Otter usage (14 seats provisioned)
+
+| User | Avg min/month | Hours/mo |
+| --- | --- | --- |
+| Cynthia Wallace | 4,623 | ~77.0 |
+| Surafeal Asgedom | 229 | ~3.8 |
+| Allie Grace | 105 | ~1.75 |
+| Scott Svabek | 92 | ~1.5 |
+| **Other 10 seats** | **0** | **0** |
+| **Team total** | **~5,048 min** | **~84 hrs/mo** |
+
+**Key findings:**
+- **10 of 14 seats are completely idle** — paying per-seat for non-users.
+- **One user (Cynthia) drives ~92%** of all transcription.
+- Per-seat pricing is a poor fit for this concentrated, low-volume pattern.
+
+### Cost comparison
+
+**Otter (current, per-seat):**
+
+| | Estimate |
+| --- | --- |
+| 14 seats × ~$15–16/seat/mo (annual rate) | **~$210–224/mo** (~$2,520–2,690/yr) |
+| Idle-seat waste (10/14 unused) | **~71% of spend** |
+
+> Use your **actual annual invoice ÷ 12** for the true figure.
+
+**Recall.ai (usage-based, ~84 hrs/mo):**
+
+| Rate | Monthly | Annual |
+| --- | --- | --- |
+| @ $0.50/hr | ~$42 | ~$504 |
+| @ $0.75/hr | ~$63 | ~$756 |
+| @ $1.00/hr | ~$84 | ~$1,008 |
+
+### Result
+
+**Recall is materially cheaper for this usage profile: ~$63/mo vs ~$210–224/mo —
+roughly $150/mo (~$1,800/yr) saved.** Usage-based billing ignores the 10 idle seats
+entirely. This *inverts* the earlier "Recall may be the biggest cost" caution — that
+risk only applies to heavy-recording teams; GA's actual volume is low and concentrated.
+
+⚠️ **Confirm before quoting:**
+1. Recall.ai's **actual per-hour rate + any monthly base/minimum fee** (a minimum could
+   raise the effective cost at this low volume).
+2. **Volume may rise** if GA App records *every* client meeting automatically (vs today's
+   selective use). Usage would need to ~3× before approaching Otter's flat fee.
+
+---
+
 ## Notes / assumptions
 
-- 8 users, ~30 clients, dozens of meetings/month — small scale; cloud "free tiers" would
-  cover some of this initially, but managed costs climb with data + retention.
+- **14 seats provisioned** (~4 active), ~30 clients, ~84 recorded meeting-hours/month —
+  small scale; cloud "free tiers" would cover some of this initially, but managed costs
+  climb with data + retention. The 14-vs-8 headcount does not change infra sizing (still
+  trivial load on the Proxmox VM).
 - Self-hosting trades **recurring cloud fees** for **owned ops** (backups, patching,
   monitoring) — acceptable here given the hardware is already paid for and underutilized
   (~8% CPU, ~61 GB RAM free).
