@@ -128,6 +128,28 @@
 
 ---
 
+## Assistant — general AI chat (Module 14) ⭐ NEW
+
+> Replaces ChatGPT seats. **Strictly per-user private** — every route enforces
+> `user_id = self`. Admins cannot read content (only purge on offboarding).
+> Design: `docs/superpowers/specs/2026-06-07-assistant-module-design.md`.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/assistant/chats` | Any (own) | List my conversations (sidebar). |
+| POST | `/api/assistant/chats` | Any | Start a new conversation. |
+| GET | `/api/assistant/chats/:id` | Any (own) | Load a conversation's messages. |
+| PATCH | `/api/assistant/chats/:id` | Any (own) | Rename / archive. |
+| DELETE | `/api/assistant/chats/:id` | Any (own) | Delete my conversation. |
+| POST | `/api/assistant/chat` | Any (own) | Send message → **streams** response. Body: `{ chatId?, message, attachmentIds? }`. Uses active model from API Settings. |
+| POST | `/api/assistant/attachments` | Any | Upload (presigned) → extract text for chat-scoped Q&A (ephemeral; NOT client docs/KB). |
+| DELETE | `/api/settings/users/:id/assistant-data` | **Admin** | Purge a user's Assistant data on deactivation. **Delete-only — never reads content.** |
+
+**File Q&A:** extracted text is injected directly into the prompt context (no embeddings;
+chunk+truncate if oversized). Attachments stay scoped to the conversation.
+
+---
+
 ## Knowledge Base (Module 9)
 
 | Method | Path | Auth | Purpose |
@@ -163,7 +185,7 @@
 | GET | `/api/settings` | Admin | All global settings (company description, business hours, lead times, AI model). |
 | PATCH | `/api/settings` | Admin | Update settings keys. |
 | GET | `/api/settings/users` | Admin | User management table. |
-| PATCH | `/api/settings/users/:id` | Admin | Change role / details. |
+| PATCH | `/api/settings/users/:id` | Admin | Change role / details / **deactivate** (sets `deactivated_at`). |
 | POST | `/api/settings/users` | Admin | Add user. |
 | GET | `/api/settings/aliases` | Admin | Client aliases. |
 | POST/DELETE | `/api/settings/aliases` | Admin | Manage aliases. |

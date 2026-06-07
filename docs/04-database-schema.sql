@@ -65,6 +65,8 @@ create type integration_key     as enum (
   'recall', 'openai', 'anthropic', 'resend', 'r2', 'ms_graph', 'logto', 'supabase'
 );
 
+create type assistant_msg_role  as enum ('user', 'assistant');
+
 -- ----------------------------------------------------------------------------
 -- HELPER: current role from JWT (Logto role claim mapped into Supabase JWT)
 -- The app sets request.jwt.claims; we read role from it.
@@ -97,6 +99,7 @@ create table users (
   role                user_role not null default 'viewer',
   calendar_connected  boolean not null default false, -- = membership in access group
   last_active_at      timestamptz,
+  deactivated_at      timestamptz,                     -- soft-disable for clean offboarding
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
@@ -371,6 +374,46 @@ create table notifications (
 );
 create index idx_notifications_user on notifications (user_id, created_at desc);
 
+-- ASSISTANT MODULE (general AI chat — replaces ChatGPT seats) -----------------
+-- See docs/superpowers/specs/2026-06-07-assistant-module-design.md.
+-- Strictly per-user private; admins NEVER read content (delete-only purge).
+
+-- assistant_chats: per-user conversations (ChatGPT-style sidebar)
+create table assistant_chats (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references users(id) on delete cascade,
+  title       text,                                  -- auto-generated from first exchange
+  model       text,                                  -- model used (from API Settings at creation)
+  archived    boolean not null default false,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index idx_assistant_chats_user on assistant_chats (user_id, updated_at desc);
+
+-- assistant_messages: messages within a conversation
+create table assistant_messages (
+  id             uuid primary key default gen_random_uuid(),
+  chat_id        uuid not null references assistant_chats(id) on delete cascade,
+  role           assistant_msg_role not null,
+  content        text not null,
+  attachment_ids uuid[] not null default '{}',       -- ephemeral files referenced this turn
+  token_usage    jsonb,                               -- {prompt, completion} for cost tracking
+  created_at     timestamptz not null default now()
+);
+create index idx_assistant_messages_chat on assistant_messages (chat_id, created_at);
+
+-- assistant_attachments: ephemeral, chat-scoped uploads (NOT client docs/KB)
+create table assistant_attachments (
+  id             uuid primary key default gen_random_uuid(),
+  chat_id        uuid not null references assistant_chats(id) on delete cascade,
+  user_id        uuid not null references users(id) on delete cascade,
+  file_name      text not null,
+  extracted_text text,                                -- text for Q&A; NO embeddings
+  r2_key         text,                                -- raw file in MinIO (optional retention)
+  created_at     timestamptz not null default now()
+);
+create index idx_assistant_attachments_chat on assistant_attachments (chat_id);
+
 -- ai_providers (multi-provider support, D11) ---------------------------------
 -- Stores configured providers + (encrypted) keys. Generation provider/model is
 -- selected in settings (ai_provider / ai_model). Embeddings stay pinned (D9).
@@ -417,7 +460,7 @@ declare t text;
 begin
   foreach t in array array[
     'users','clients','meetings','documents','tasks',
-    'client_notes','ai_providers','integration_credentials'
+    'client_notes','ai_providers','integration_credentials','assistant_chats'
   ]
   loop
     execute format(
@@ -455,6 +498,9 @@ alter table embeddings                enable row level security;
 alter table notifications             enable row level security;
 alter table ai_providers              enable row level security;
 alter table integration_credentials   enable row level security;
+alter table assistant_chats           enable row level security;
+alter table assistant_messages        enable row level security;
+alter table assistant_attachments     enable row level security;
 
 -- ---- READ policies (all authenticated roles can read most content) ----------
 -- Generic "any authenticated user can select" for shared content.
@@ -575,6 +621,21 @@ create policy self_update_users on users for update using (id = auth_uid());
 -- notifications: users mark own read
 create policy update_notifications on notifications for update using (user_id = auth_uid());
 
+-- ASSISTANT: strictly private to the author. NO admin read exception.
+-- Admin purge-on-offboarding is a delete-only path performed via service-role
+-- (worker/backend), which bypasses RLS — so no admin SELECT policy is granted here.
+create policy own_assistant_chats on assistant_chats for all
+  using (user_id = auth_uid()) with check (user_id = auth_uid());
+
+create policy own_assistant_messages on assistant_messages for all
+  using (exists (select 1 from assistant_chats c
+                 where c.id = assistant_messages.chat_id and c.user_id = auth_uid()))
+  with check (exists (select 1 from assistant_chats c
+                      where c.id = assistant_messages.chat_id and c.user_id = auth_uid()));
+
+create policy own_assistant_attachments on assistant_attachments for all
+  using (user_id = auth_uid()) with check (user_id = auth_uid());
+
 -- meetings/master_record/syncs/briefs/pipeline_runs writes happen via service-role
 -- (worker) which bypasses RLS. No anon write policies needed for those.
 
@@ -602,5 +663,6 @@ $$;
 --   meetings, folders, documents, tasks, task_notes, client_notes, client_tabs,
 --   master_record_entries, daily_syncs, pre_meeting_briefs, pipeline_runs,
 --   knowledge_base_documents, embeddings, notifications, ai_providers,
---   integration_credentials  (21)
+--   integration_credentials, assistant_chats, assistant_messages,
+--   assistant_attachments  (24)
 -- ============================================================================

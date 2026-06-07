@@ -93,7 +93,8 @@ Ready (emerald) · Requires Review (amber) · Delivered (blue).
 ## 6. Navigation (sidebar)
 
 1. Overview · 2. Clients · 3. Pipeline · 4. Documents · 5. Task Board ·
-6. Calendar · 7. Daily Sync · 8. Knowledge Base · 9. Settings (Admin only).
+6. Calendar · 7. Daily Sync · 8. Knowledge Base · 9. **Assistant** (all roles) ·
+10. Settings (Admin only).
 
 **Bottom section:** avatar (initials), name, role badge (Admin = navy, Viewer = amber, Standard = none), calendar connection dot (green), Sign Out.
 
@@ -128,7 +129,8 @@ server omission — not merely disabled.
 - **M9 Knowledge Base:** table (title, topic chips, type, uploaded, status, expiry badges); filters; upload modal (title, file, tags, description, expiration, AI toggle).
 - **M10 Login:** centered card, GA wordmark, "Sign in with Microsoft", dark navy gradient; first-login "Setting up your account…".
 - **M11 File Browser:** two-panel (folder tree / file list), breadcrumb; default folders Generated/Uploads/Pre-Meeting/Transcripts(🔒 Admin); folder + file actions per role.
-- **M12 Settings (Admin):** Company Settings, Calendar & Automation, Integrations + **API Settings** (below), User Management.
+- **M12 Settings (Admin):** Company Settings, Calendar & Automation, Integrations + **API Settings** (below), User Management (incl. deactivate + purge Assistant data on offboarding).
+- **M14 Assistant (all roles):** general-purpose AI chat that replaces ChatGPT seats. ChatGPT-style two-pane: left = my conversation list (auto-titled, search, new/archive/delete); right = streaming message thread (user right / assistant left, markdown), input with file-attach. Strictly private per user. File Q&A is chat-scoped & ephemeral (not client docs/KB). Model set by Admin via API Settings. **Native to the Gracie portal** — reuses the shared chat components, design tokens, and AI provider stack (same look/feel as the client Intelligence tab). Web search = fast-follow. Full spec: `docs/superpowers/specs/2026-06-07-assistant-module-design.md`.
 
 ---
 

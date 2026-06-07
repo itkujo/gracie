@@ -58,16 +58,24 @@ managed cloud services, delivered on owned hardware at low marginal cost.
 - **Vs. current combined tooling (~$390–404/mo), GA App is ~$220/mo (~$2,640/yr) cheaper.**
 - **Self-hosting vs cloud-hosting GA App** saves a further ~$215/mo (~$2,580/yr).
 
-### ChatGPT seats — partial displacement (conservative)
+### ChatGPT seats — displacement plan (staged on the Assistant module)
 
-GA App uses the **same OpenAI models** your team accesses via ChatGPT Business. It absorbs
-**task-specific** AI work (meeting summaries, follow-up drafts, client-scoped Q&A). It does
-**not** replace **general-purpose** ChatGPT use (ad-hoc writing/research/brainstorming).
+GA App includes an **Assistant module** (Module 14) — a general-purpose AI chat built to
+replace ChatGPT seats (writing, research, file Q&A). See
+`superpowers/specs/2026-06-07-assistant-module-design.md`.
 
-- **Conservative:** keep ChatGPT seats; GA App reduces manual effort, not the seat count.
-- **Likely:** some users who only used ChatGPT for meeting/client tasks can drop their seat,
-  or the line stops growing. Even dropping **4–5 seats = ~$80–100/mo (~$960–1,200/yr)** more
-  saved. Validate per-user after GA App is live before cutting seats.
+**Staged, deliberately conservative:**
+- **Phase A (Assistant MVP — writing/research/file Q&A):** covers most daily use, BUT
+  **not a full ChatGPT replacement yet** because **web search/live info is a fast-follow,
+  not in MVP**. → Keep ChatGPT seats for now; treat savings as *potential*, not booked.
+- **Phase B (Assistant + web search):** once live web access ships, the Assistant covers
+  the team's confirmed use cases → **cancel ChatGPT seats = full $180/mo (~$2,160/yr)
+  eliminated.**
+- Validate per-user before cutting. A user or two may keep ChatGPT for niche features
+  (image gen, custom GPTs, voice) the Assistant intentionally doesn't cover.
+
+**Bottom line:** the $180/mo ChatGPT saving is **real but gated on the web-search
+fast-follow** — do not book it in the client number until web search is live.
 
 ---
 

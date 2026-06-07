@@ -170,5 +170,8 @@ Layer 3 — In-app file browser  ← what humans see (Next.js, via presigned URL
 | `05-api-route-map.md` | Every endpoint, method, auth, role gate, shapes, webhooks |
 | `06-ai-pipeline.md` | Prompt chain, both pipelines, provider abstraction |
 | `07-integrations.md` | Per-service setup, env vars, webhooks |
-| `08-design-system.md` | Colors, typography, tokens, components, all 13 modules |
-| `09-build-phases.md` | 10 phases as subagent-ready work packages + delegation briefs |
+| `08-design-system.md` | Colors, typography, tokens, components, all modules (incl. Assistant) |
+| `09-build-phases.md` | 10 phases (+ P6B Assistant) as subagent-ready work packages + delegation briefs |
+| `10-cost-analysis.md` | Self-host vs cloud + Otter→Recall + current-tooling cost comparison |
+| `11-infra-runbook.md` | Step-by-step Proxmox VM + Coolify + self-hosted stack setup |
+| `superpowers/specs/2026-06-07-assistant-module-design.md` | Approved design for the Assistant module |

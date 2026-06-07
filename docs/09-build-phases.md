@@ -29,6 +29,7 @@ P1 Foundation ──┬─► P2 Client Profiles & Files ──┬─► P5 AI P
                 │                                  │
                 └─► P4 Calendar ───────────────────┘
                                                    └─► P7 Briefs/Sync/Notifications
+P6 ─► P6B Assistant (reuses P6 streaming/provider)
 P5 ─► P8 n8n
 (P1..P7) ─► P9 Settings/Admin/Scoring ─► P10 Testing & Launch
 ```
@@ -225,6 +226,42 @@ notify. Plus the AI provider abstraction (OpenAI adapter).
 > on ingest, archive toggling `ai_active`. **Acceptance:** asking a client-scoped question
 > returns a streamed answer grounded in that client's documents; toggling KB injects KB
 > context; a KB doc can be uploaded, embedded, archived; typecheck + lint pass.
+
+---
+
+## Phase 6B — Assistant Module (general AI chat) — pairs with Phase 6
+
+**Goal:** general-purpose AI chat that replaces ChatGPT seats (Module 14). Reuses the
+Phase 6 streaming + provider work; native to the Gracie portal.
+
+**Scope:**
+- `/assistant` module + sidebar item (all roles); ChatGPT-style two-pane UI reusing the
+  Phase 6 chat components.
+- `assistant_chats` / `assistant_messages` / `assistant_attachments` tables (already in
+  schema); strictly per-user RLS.
+- Streaming chat via the provider interface; per-user conversation history + auto-titles.
+- File Q&A: extract text on upload, inject into context (no embeddings); chat-scoped/ephemeral.
+- Admin purge-on-deactivation (`users.deactivated_at` + delete-only data purge).
+- **Web search = explicitly out of scope** (fast-follow, separate later task).
+
+> ### Delegation Brief — P6B
+> **Build the Assistant module for GA App.** Read the full spec
+> `docs/superpowers/specs/2026-06-07-assistant-module-design.md`, plus `docs/04`
+> (assistant_* tables, users.deactivated_at), `docs/05` (Assistant routes), `docs/08` §M14.
+> Build `/api/assistant/*` (chats CRUD, streaming `/chat`, attachments) — **every route
+> enforces `user_id = self`**. Reuse the Phase 6 streaming + AI provider interface and the
+> existing file-extraction code. File Q&A injects extracted text directly into the prompt
+> context (NO embeddings; chunk+truncate if oversized); attachments are chat-scoped and
+> ephemeral (never client docs/KB). Build the `/assistant` UI as a ChatGPT-style two-pane
+> reusing the client Intelligence chat components + GA design tokens so it feels **native to
+> the portal**. Conversations are **strictly private** — admins cannot read content; RLS has
+> no admin SELECT. Implement admin **purge-on-deactivation** (`DELETE
+> /api/settings/users/:id/assistant-data`, delete-only via service-role). Model is the active
+> one from API Settings (users don't choose). **Do NOT** build web search (fast-follow) or
+> image/voice/code-exec. **Acceptance:** a user can hold multiple private conversations with
+> streaming + auto-titles; another user/admin cannot read them (verify RLS); file upload →
+> grounded answer, attachment stays chat-scoped; deactivating a user purges their assistant
+> data; changing the model in API Settings affects new chats; typecheck + lint + build pass.
 
 ---
 
