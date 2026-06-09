@@ -1,26 +1,35 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useState } from 'react';
 import { ArrowDownRight, ArrowRight, ArrowUpRight, AlertTriangle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { Client, ClientNote, MasterRecordEntry } from '@gracie/shared';
 
-import {
-  getClientById,
-  getClientNotesByClient,
-  getMasterRecordByClient,
-  getUserName,
-} from '@/lib/mock';
+import { getUserName } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDate, formatEasternDateTime } from '@/lib/format';
 import { cadenceLabel, trendDisplay } from '@/lib/client-display';
 import { Card, CardHeader } from '@/components/ui/Card';
-import { EmptyState, ErrorState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Client tab 2 — Strategy (docs/08 §9). Trajectory indicator, meeting-frequency,
- * risk flags (red), the MASTER_RECORD chronology, and admin notes feed. All data
- * via MOCK selectors (Phase 1B-safe).
+ * risk flags (red), the master-record chronology, and admin notes feed.
+ * Trajectory/cadence/risk derive from `GET /api/clients/:id/strategy`; the admin
+ * notes feed reads `GET /api/clients/:id/notes` (real Supabase data). User names
+ * still resolve through the mock display lookup (users module not yet wired).
  */
+interface StrategyResponse {
+  readonly client: Client;
+  readonly masterRecord: readonly MasterRecordEntry[];
+  readonly riskFlags: readonly string[];
+}
+
+interface NotesResponse {
+  readonly notes: readonly ClientNote[];
+}
+
 const TREND_ICON: Readonly<Record<'up' | 'flat' | 'down', LucideIcon>> = {
   up: ArrowUpRight,
   flat: ArrowRight,
@@ -33,16 +42,41 @@ export default function ClientStrategyPage({
   readonly params: Promise<{ clientId: string }>;
 }): React.JSX.Element {
   const { clientId } = use(params);
-  const client = getClientById(clientId);
 
-  if (client === undefined) {
-    return <ErrorState title="Client not found" description="This client reference is invalid." />;
+  const [data, setData] = useState<StrategyResponse | null>(null);
+  const [adminNotes, setAdminNotes] = useState<readonly ClientNote[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiClient.get<StrategyResponse>(`/api/clients/${clientId}/strategy`),
+      apiClient.get<NotesResponse>(`/api/clients/${clientId}/notes`),
+    ])
+      .then(([strategy, notes]) => {
+        if (!active) return;
+        setData(strategy);
+        setAdminNotes(notes.notes);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load strategy');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load strategy" description={error} />;
   }
 
+  if (data === null || adminNotes === null) {
+    return <LoadingState label="Loading strategy…" />;
+  }
+
+  const { client, masterRecord } = data;
   const trend = trendDisplay(client.relationshipTrend);
   const TrendIcon = trend !== null ? TREND_ICON[trend.direction] : ArrowRight;
-  const masterRecord = getMasterRecordByClient(clientId);
-  const adminNotes = getClientNotesByClient(clientId);
   const isAtRisk =
     client.relationshipTrend === 'declining' ||
     (client.relationshipHealth !== null && client.relationshipHealth < 70);

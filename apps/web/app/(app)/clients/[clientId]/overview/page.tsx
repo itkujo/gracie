@@ -1,43 +1,65 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useState } from 'react';
 import { ExternalLink, Pencil } from 'lucide-react';
-import type { Task } from '@gracie/shared';
+import type { Client, Meeting, Task } from '@gracie/shared';
 
-import {
-  getClientById,
-  getLatestMeetingForClient,
-  getTasksByClient,
-  getUserName,
-} from '@/lib/mock';
+import { getUserName } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDateTime } from '@/lib/format';
 import { healthColor, healthLabel, priorityBadge, taskStatusLabel } from '@/lib/client-display';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { EmptyState, ErrorState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Client tab 1 — Overview (docs/08 §9). Relationship health card, last-meeting
  * snapshot, top-3 open tasks, an editable-looking description, and the Drive
- * quick-link. All data via MOCK selectors (Phase 1B-safe).
+ * quick-link. Data via `GET /api/clients/:id/overview` (real Supabase data).
+ * User names still resolve through the mock display lookup (users module not
+ * yet wired).
  */
+interface OverviewResponse {
+  readonly client: Client;
+  readonly lastMeeting: Meeting | null;
+  readonly topTasks: readonly Task[];
+}
+
 export default function ClientOverviewPage({
   params,
 }: {
   readonly params: Promise<{ clientId: string }>;
 }): React.JSX.Element {
   const { clientId } = use(params);
-  const client = getClientById(clientId);
 
-  if (client === undefined) {
-    return <ErrorState title="Client not found" description="This client reference is invalid." />;
+  const [data, setData] = useState<OverviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get<OverviewResponse>(`/api/clients/${clientId}/overview`)
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load overview');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load overview" description={error} />;
   }
 
-  const latestMeeting = getLatestMeetingForClient(clientId);
-  const openTasks: readonly Task[] = getTasksByClient(clientId)
-    .filter((task) => task.status !== 'complete' && !task.isArchived)
-    .slice(0, 3);
+  if (data === null) {
+    return <LoadingState label="Loading overview…" />;
+  }
+
+  const { client, lastMeeting, topTasks } = data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -59,23 +81,23 @@ export default function ClientOverviewPage({
         {/* Last meeting snapshot */}
         <Card className="p-6 lg:col-span-2">
           <CardHeader title="Last Meeting" />
-          {latestMeeting === undefined ? (
+          {lastMeeting === null ? (
             <EmptyState
               title="No meetings yet"
               description="Scheduled and completed meetings for this client will appear here."
             />
           ) : (
             <div className="flex flex-col gap-1">
-              <p style={TYPE.bodyStrong}>{latestMeeting.title ?? 'Untitled meeting'}</p>
+              <p style={TYPE.bodyStrong}>{lastMeeting.title ?? 'Untitled meeting'}</p>
               <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-                {formatEasternDateTime(latestMeeting.dateTime)}
-                {latestMeeting.durationMinutes !== null
-                  ? ` · ${latestMeeting.durationMinutes} min`
+                {formatEasternDateTime(lastMeeting.dateTime)}
+                {lastMeeting.durationMinutes !== null
+                  ? ` · ${lastMeeting.durationMinutes} min`
                   : null}
               </p>
               <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-                Led by {getUserName(latestMeeting.meetingLeadUserId)} ·{' '}
-                {latestMeeting.attendeeUserIds.length} attendees
+                Led by {getUserName(lastMeeting.meetingLeadUserId)} ·{' '}
+                {lastMeeting.attendeeUserIds.length} attendees
               </p>
             </div>
           )}
@@ -85,14 +107,14 @@ export default function ClientOverviewPage({
       {/* Top open tasks */}
       <Card>
         <CardHeader title="Top Open Tasks" description="The three highest-priority open items." />
-        {openTasks.length === 0 ? (
+        {topTasks.length === 0 ? (
           <EmptyState
             title="No open tasks"
             description="There are no open tasks for this client right now."
           />
         ) : (
           <ul className="flex flex-col gap-2">
-            {openTasks.map((task) => {
+            {topTasks.map((task) => {
               const badge = priorityBadge(task.hasPriorityFlag);
               return (
                 <li

@@ -1,28 +1,30 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import type { ClientNote } from '@gracie/shared';
 
-import {
-  getClientById,
-  getClientNotesByClient,
-  getUserInitials,
-  getUserName,
-} from '@/lib/mock';
+import { getUserInitials, getUserName } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDateTime } from '@/lib/format';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ClientAvatar } from '@/components/ClientAvatar';
-import { EmptyState, ErrorState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Client tab 5 — Notes (docs/08 §9). Compose area (editors only) + chronological
  * feed (newest first) with author chip + timestamp. The compose Post action is
- * visual-only in Phase 1A/2 (no persistence); Phase 1B wires it to
- * `POST /api/clients/:id/notes`. Data via MOCK selectors.
+ * visual-only in Phase 2 (no persistence); it will wire to
+ * `POST /api/clients/:id/notes` later. Notes load via `GET /api/clients/:id/notes`
+ * (real Supabase data). User names/initials still resolve through the mock
+ * display lookup (users module not yet wired).
  */
+interface NotesResponse {
+  readonly notes: readonly ClientNote[];
+}
+
 export default function ClientNotesPage({
   params,
 }: {
@@ -32,14 +34,31 @@ export default function ClientNotesPage({
   const { canEdit } = useAuth();
   const [draft, setDraft] = useState<string>('');
 
-  const client = getClientById(clientId);
-  if (client === undefined) {
-    return <ErrorState title="Client not found" description="This client reference is invalid." />;
+  const [notes, setNotes] = useState<readonly ClientNote[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get<NotesResponse>(`/api/clients/${clientId}/notes`)
+      .then((result) => {
+        if (active) setNotes(result.notes);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load notes');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load notes" description={error} />;
   }
 
-  const notes: readonly ClientNote[] = getClientNotesByClient(clientId)
-    .slice()
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  if (notes === null) {
+    return <LoadingState label="Loading notes…" />;
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -58,7 +77,7 @@ export default function ClientNotesPage({
             style={{ borderColor: 'var(--border-subtle)', ...TYPE.body }}
           />
           <div className="mt-3 flex justify-end">
-            {/* Phase 1B: wire to POST /api/clients/:id/notes. Visual-only now. */}
+            {/* Wires to POST /api/clients/:id/notes later. Visual-only now. */}
             <Button variant="primary" disabled={draft.trim() === ''}>
               Post note
             </Button>

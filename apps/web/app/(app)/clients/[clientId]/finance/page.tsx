@@ -1,22 +1,32 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
-import type { Task } from '@gracie/shared';
+import type { Client, Task } from '@gracie/shared';
 
-import { getClientById, getTasksByClient } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { feeTierDisplay, formatUsd } from '@/lib/client-display';
 import { Card, CardHeader } from '@/components/ui/Card';
-import { EmptyState, ErrorState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Client tab 3 — Finance (docs/08 §9). ADMIN-ONLY. The tab is hidden from the
  * tab nav for non-admins (client layout); this guard is defense-in-depth so a
- * direct URL visit still yields no finance content (mirrors server omission,
- * D14). Admin-only fields are marked with a 🔒 (docs/08 §1).
+ * direct URL visit still yields no finance content (mirrors the server 403,
+ * D14). Data via `GET /api/clients/:id/finance` (admin-only; returns 403
+ * otherwise) plus the operations tasks for the completion-rate panel.
+ * Admin-only fields are marked with a 🔒 (docs/08 §1).
  */
+interface FinanceResponse {
+  readonly client: Client;
+}
+
+interface OperationsResponse {
+  readonly tasks: readonly Task[];
+}
+
 export default function ClientFinancePage({
   params,
 }: {
@@ -24,8 +34,33 @@ export default function ClientFinancePage({
 }): React.JSX.Element {
   const { clientId } = use(params);
   const { can } = useAuth();
+  const canViewFinance = can('finance.view');
 
-  if (!can('finance.view')) {
+  const [client, setClient] = useState<Client | null>(null);
+  const [tasks, setTasks] = useState<readonly Task[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canViewFinance) return;
+    let active = true;
+    Promise.all([
+      apiClient.get<FinanceResponse>(`/api/clients/${clientId}/finance`),
+      apiClient.get<OperationsResponse>(`/api/clients/${clientId}/operations`),
+    ])
+      .then(([finance, operations]) => {
+        if (!active) return;
+        setClient(finance.client);
+        setTasks(operations.tasks);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load finance');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId, canViewFinance]);
+
+  if (!canViewFinance) {
     return (
       <ErrorState
         title="Access restricted"
@@ -34,14 +69,18 @@ export default function ClientFinancePage({
     );
   }
 
-  const client = getClientById(clientId);
-  if (client === undefined) {
-    return <ErrorState title="Client not found" description="This client reference is invalid." />;
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load finance" description={error} />;
   }
 
-  const tasks: readonly Task[] = getTasksByClient(clientId).filter((task) => !task.isArchived);
-  const completedCount = tasks.filter((task) => task.status === 'complete').length;
-  const completionRate = tasks.length === 0 ? 0 : Math.round((completedCount / tasks.length) * 100);
+  if (client === null || tasks === null) {
+    return <LoadingState label="Loading finance…" />;
+  }
+
+  const activeTasks = tasks.filter((task) => !task.isArchived);
+  const completedCount = activeTasks.filter((task) => task.status === 'complete').length;
+  const completionRate =
+    activeTasks.length === 0 ? 0 : Math.round((completedCount / activeTasks.length) * 100);
   const fee = feeTierDisplay(client.feeTier);
 
   return (
@@ -88,7 +127,7 @@ export default function ClientFinancePage({
           title="Task Completion Rate"
           description="Completed vs. total active tasks for this client."
         />
-        {tasks.length === 0 ? (
+        {activeTasks.length === 0 ? (
           <EmptyState
             title="No tasks to measure"
             description="Completion rate will appear once tasks exist for this client."
@@ -100,7 +139,7 @@ export default function ClientFinancePage({
                 {completionRate}%
               </span>
               <span style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-                {completedCount} of {tasks.length} tasks complete
+                {completedCount} of {activeTasks.length} tasks complete
               </span>
             </div>
             <div

@@ -1,18 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { notFound, usePathname } from 'next/navigation';
-import { use } from 'react';
+import { usePathname } from 'next/navigation';
+import { use, useEffect, useState } from 'react';
 import { ArrowLeft, Upload } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import type { Permission } from '@gracie/shared';
+import type { Client, Permission } from '@gracie/shared';
 
-import { getClientById } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { ClientAvatar } from '@/components/ClientAvatar';
 import { Button } from '@/components/ui/Button';
+import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Client profile shell with the 7-tab nav (docs/08 §9, docs/03 §3).
@@ -25,8 +26,12 @@ import { Button } from '@/components/ui/Button';
  * unchanged against the real Logto session in Phase 1B.
  *
  * Phase 1B: tabs become renamable/reorderable by Admin (backed by `client_tabs`);
- * the client header reads from `GET /api/clients/:id` instead of the mock.
+ * the client header now reads from `GET /api/clients/:id/overview` (real data).
  */
+interface OverviewResponse {
+  readonly client: Client;
+}
+
 interface ClientTab {
   readonly label: string;
   readonly segment: string;
@@ -55,10 +60,23 @@ export default function ClientDetailLayout({
   const { can } = useAuth();
   const pathname = usePathname();
 
-  const client = getClientById(clientId);
-  if (client === undefined) {
-    notFound();
-  }
+  const [client, setClient] = useState<Client | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get<OverviewResponse>(`/api/clients/${clientId}/overview`)
+      .then((data) => {
+        if (active) setClient(data.client);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load client');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
 
   const canUpload = can('file.upload');
 
@@ -79,24 +97,30 @@ export default function ClientDetailLayout({
         Back to clients
       </Link>
 
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <ClientAvatar initials={client.initials} size="lg" />
-          <div className="flex flex-col gap-0.5">
-            <h1 style={TYPE.pageTitle}>{client.name}</h1>
-            <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-              <span className="font-data">{client.contractNumber ?? 'No contract number'}</span>
-              {client.primaryContact !== null ? ` · ${client.primaryContact}` : null}
-            </p>
+      {error !== null ? (
+        <ErrorState title="Couldn’t load client" description={error} />
+      ) : client === null ? (
+        <LoadingState label="Loading client…" />
+      ) : (
+        <header className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <ClientAvatar initials={client.initials} size="lg" />
+            <div className="flex flex-col gap-0.5">
+              <h1 style={TYPE.pageTitle}>{client.name}</h1>
+              <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
+                <span className="font-data">{client.contractNumber ?? 'No contract number'}</span>
+                {client.primaryContact !== null ? ` · ${client.primaryContact}` : null}
+              </p>
+            </div>
           </div>
-        </div>
 
-        {canUpload ? (
-          <Button variant="primary" icon={<Upload aria-hidden="true" size={16} />}>
-            Upload
-          </Button>
-        ) : null}
-      </header>
+          {canUpload ? (
+            <Button variant="primary" icon={<Upload aria-hidden="true" size={16} />}>
+              Upload
+            </Button>
+          ) : null}
+        </header>
+      )}
 
       <nav
         aria-label="Client profile tabs"

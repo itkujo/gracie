@@ -1,16 +1,11 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
-import type { Document, Meeting, Task } from '@gracie/shared';
+import type { Meeting, Task } from '@gracie/shared';
 
-import {
-  getClientById,
-  getDocumentsByClient,
-  getMeetingsByClient,
-  getTasksByClient,
-  getUserName,
-} from '@/lib/mock';
+import { getUserName } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDate, formatEasternDateTime } from '@/lib/format';
 import { priorityBadge, taskStatusLabel } from '@/lib/client-display';
@@ -18,15 +13,22 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Tabs } from '@/components/ui/Tabs';
 import { Table, THead, TBody, TRow, TH, TCell } from '@/components/ui/Table';
-import { EmptyState, ErrorState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 import type { PipelineStatus } from '@gracie/shared';
 
 /**
  * Client tab 4 — Operations (docs/08 §9). Client-scoped task table (priority
- * badges), pipeline run history, and transcript history. Pipeline runs and
- * transcripts are derived from the mock meetings/documents selectors
- * (Phase 1B: replaced by `pipeline_runs` + transcript documents from the API).
+ * badges), pipeline run history, and transcript history. Data via
+ * `GET /api/clients/:id/operations` (real Supabase data) returning client-scoped
+ * tasks and meetings. Pipeline runs and transcript history are derived from the
+ * meetings' pipeline status / transcript-received flags. User names still
+ * resolve through the mock display lookup (users module not yet wired).
  */
+interface OperationsResponse {
+  readonly tasks: readonly Task[];
+  readonly meetings: readonly Meeting[];
+}
+
 const PIPELINE_STATUS_LABEL: Readonly<Record<PipelineStatus, string>> = {
   scheduled: 'Scheduled',
   in_progress: 'In Progress',
@@ -53,17 +55,36 @@ export default function ClientOperationsPage({
   readonly params: Promise<{ clientId: string }>;
 }): React.JSX.Element {
   const { clientId } = use(params);
-  const client = getClientById(clientId);
 
-  if (client === undefined) {
-    return <ErrorState title="Client not found" description="This client reference is invalid." />;
+  const [data, setData] = useState<OperationsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get<OperationsResponse>(`/api/clients/${clientId}/operations`)
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load operations');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load operations" description={error} />;
   }
 
-  const tasks: readonly Task[] = getTasksByClient(clientId).filter((task) => !task.isArchived);
-  const meetings: readonly Meeting[] = getMeetingsByClient(clientId);
-  const transcripts: readonly Document[] = getDocumentsByClient(clientId).filter(
-    (doc) => doc.documentType === 'other' && doc.sourceBadge === 'meeting',
-  );
+  if (data === null) {
+    return <LoadingState label="Loading operations…" />;
+  }
+
+  const tasks = data.tasks.filter((task) => !task.isArchived);
+  const { meetings } = data;
+  const transcripts = meetings.filter((meeting) => meeting.isTranscriptReceived);
 
   return (
     <Tabs
@@ -177,7 +198,7 @@ function PipelinePanel({ meetings }: { readonly meetings: readonly Meeting[] }):
 function TranscriptsPanel({
   transcripts,
 }: {
-  readonly transcripts: readonly Document[];
+  readonly transcripts: readonly Meeting[];
 }): React.JSX.Element {
   if (transcripts.length === 0) {
     return (
@@ -189,17 +210,17 @@ function TranscriptsPanel({
   }
   return (
     <ul className="flex flex-col gap-2">
-      {transcripts.map((doc) => (
+      {transcripts.map((meeting) => (
         <li
-          key={doc.id}
+          key={meeting.id}
           className="flex items-center gap-3 rounded-md border p-3"
           style={{ borderColor: 'var(--border-subtle)' }}
         >
           <FileText aria-hidden="true" size={16} style={{ color: 'var(--text-secondary)' }} />
           <div className="flex flex-col">
-            <span style={TYPE.body}>{doc.fileName}</span>
+            <span style={TYPE.body}>{meeting.title ?? 'Untitled meeting'}</span>
             <span style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-              {formatEasternDateTime(doc.createdAt)}
+              {formatEasternDateTime(meeting.dateTime)}
             </span>
           </div>
         </li>

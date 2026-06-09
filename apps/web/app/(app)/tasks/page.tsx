@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   Check,
@@ -9,17 +9,11 @@ import {
   MessageSquarePlus,
   Pencil,
 } from 'lucide-react';
-import type { Task, TaskStatus } from '@gracie/shared';
+import type { Task, TaskNote, TaskStatus } from '@gracie/shared';
 import { TASK_STATUSES } from '@gracie/shared';
 
-import {
-  MOCK_TASKS,
-  getActiveTasks,
-  getClientName,
-  getTaskNotesByTask,
-  getUserInitials,
-  getUserName,
-} from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
+import { getClientName, getUserInitials, getUserName } from '@/lib/mock';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDate, formatEasternDateTime } from '@/lib/format';
@@ -33,7 +27,7 @@ import type { TaskUrgency } from '@/lib/client-display';
 import { ClientAvatar } from '@/components/ClientAvatar';
 import { Badge } from '@/components/ui/Badge';
 import { Table, THead, TBody, TRow, TH, TCell } from '@/components/ui/Table';
-import { EmptyState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Module 6 — Task Board (docs/08 §8 M6, §9).
@@ -49,7 +43,10 @@ import { EmptyState } from '@/components/ui/StateViews';
  *     their OWN tasks (`ownerUserId === user.id`). For other tasks a viewer sees
  *     the button disabled (D14 `task.completeOwn`).
  *
- * MOCK: every action below is visual-only (no network) — Phase 1B wires these to
+ * Tasks are fetched from `GET /api/tasks` (real Supabase data); the archived
+ * toggle re-fetches with `?archived=true`. Task notes load on demand from
+ * `GET /api/tasks/[taskId]/notes` when a row is expanded. Mutating actions
+ * below remain visual-only (no network) — Phase 1B wires these to
  * `PATCH/POST /api/tasks/...`. The "today" reference is the fixed mock app date
  * (2026-04-24); Phase 1B replaces `TODAY` with `new Date()`.
  */
@@ -62,6 +59,14 @@ type ClientFilter = string | 'all';
 type OwnerFilter = string | 'all';
 type PriorityFilter = 'all' | 'priority' | 'standard';
 
+interface TasksResponse {
+  readonly tasks: readonly Task[];
+}
+
+interface TaskNotesResponse {
+  readonly notes: readonly TaskNote[];
+}
+
 const URGENCY_TONE: Readonly<Record<TaskUrgency, 'critical' | 'warning' | 'default'>> = {
   overdue: 'critical',
   due_soon: 'warning',
@@ -72,6 +77,8 @@ export default function TasksPage(): React.JSX.Element {
   const { user, canEdit } = useAuth();
   const editable = canEdit();
 
+  const [tasks, setTasks] = useState<readonly Task[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState<boolean>(false);
   const [clientFilter, setClientFilter] = useState<ClientFilter>('all');
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
@@ -79,11 +86,26 @@ export default function TasksPage(): React.JSX.Element {
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
-  // Base set: active-only by default; include archived when toggled (M6).
-  const baseTasks = useMemo<readonly Task[]>(
-    () => (showArchived ? MOCK_TASKS : getActiveTasks()),
-    [showArchived],
-  );
+  // Active-only by default; the archived toggle re-fetches with ?archived=true (M6).
+  useEffect(() => {
+    let active = true;
+    setTasks(null);
+    setError(null);
+    const path = showArchived ? '/api/tasks?archived=true' : '/api/tasks';
+    apiClient
+      .get<TasksResponse>(path)
+      .then((data) => {
+        if (active) setTasks(data.tasks);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load tasks');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [showArchived]);
+
+  const baseTasks = useMemo<readonly Task[]>(() => tasks ?? [], [tasks]);
 
   // Distinct clients/owners present in the base set drive the filter dropdowns.
   const clientOptions = useMemo<readonly string[]>(
@@ -121,13 +143,20 @@ export default function TasksPage(): React.JSX.Element {
     [filteredTasks],
   );
 
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load tasks" description={error} />;
+  }
+
   return (
     <section className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h1 style={TYPE.pageTitle}>Task Board</h1>
         <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-          {filteredTasks.length} task{filteredTasks.length === 1 ? '' : 's'} across all clients
-          {overdueCount > 0 ? ` · ${overdueCount} overdue` : ''}.
+          {tasks === null
+            ? 'Loading tasks…'
+            : `${filteredTasks.length} task${filteredTasks.length === 1 ? '' : 's'} across all clients${
+                overdueCount > 0 ? ` · ${overdueCount} overdue` : ''
+              }.`}
         </p>
       </header>
 
@@ -175,7 +204,9 @@ export default function TasksPage(): React.JSX.Element {
         </label>
       </div>
 
-      {filteredTasks.length === 0 ? (
+      {tasks === null ? (
+        <LoadingState label="Loading tasks…" />
+      ) : filteredTasks.length === 0 ? (
         <EmptyState
           title="No matching tasks"
           description="No tasks match the current filters. Adjust the client, owner, status, or priority filters to see results."
@@ -233,7 +264,6 @@ function TaskRow({
   const urgency = taskUrgency(task.dueDate, isComplete, TODAY);
   const tone = URGENCY_TONE[urgency];
   const priority = priorityBadge(task.hasPriorityFlag);
-  const notes = getTaskNotesByTask(task.id);
 
   // Viewers may complete ONLY their own tasks; editors may complete any task.
   const isOwnTask = task.ownerUserId === currentUserId;
@@ -251,7 +281,7 @@ function TaskRow({
             type="button"
             onClick={onToggleExpand}
             aria-expanded={isExpanded}
-            aria-label={isExpanded ? 'Hide notes' : `Show notes (${notes.length})`}
+            aria-label={isExpanded ? 'Hide notes' : 'Show notes'}
             className="rounded-md p-1"
             style={{ color: 'var(--text-secondary)', background: 'transparent', cursor: 'pointer' }}
           >
@@ -362,7 +392,40 @@ function DueDateCell({
 }
 
 function TaskNotes({ taskId }: { readonly taskId: string }): React.JSX.Element {
-  const notes = getTaskNotesByTask(taskId);
+  const [notes, setNotes] = useState<readonly TaskNote[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setNotes(null);
+    setError(null);
+    apiClient
+      .get<TaskNotesResponse>(`/api/tasks/${taskId}/notes`)
+      .then((data) => {
+        if (active) setNotes(data.notes);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load notes');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [taskId]);
+
+  if (error !== null) {
+    return (
+      <p role="alert" style={{ ...TYPE.secondary, color: 'var(--color-red-600)' }}>
+        {error}
+      </p>
+    );
+  }
+  if (notes === null) {
+    return (
+      <p role="status" aria-live="polite" style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
+        Loading notes…
+      </p>
+    );
+  }
   if (notes.length === 0) {
     return (
       <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>

@@ -1,0 +1,102 @@
+/**
+ * Server-side data access for documents + folders (Phase 1B).
+ *
+ * Uses the service-role Supabase client (bypasses RLS); permission enforcement
+ * is the API layer's job (docs/02 §D14). Runs only on the server — never import
+ * this into a client component. Mirrors lib/data/clients.ts.
+ *
+ * SECURITY-CRITICAL — restricted-folder omission (docs/08 §1/§7, D14):
+ * `restricted`-visibility folders (e.g. Transcripts) are OMITTED entirely for
+ * roles not in `allowedRoles`. `filterVisibleFolders` and `filterVisibleDocuments`
+ * below implement that omission and MUST be applied in the API before any folder
+ * or document reaches a non-admin client. This mirrors FileBrowser's
+ * `isVisibleToRole` (admins-only for restricted folders).
+ */
+import 'server-only';
+
+import { getServerClient } from '@gracie/db';
+import type { Document, Folder } from '@gracie/shared';
+
+import { mapDocument, mapFolder } from '../mappers/document.js';
+
+interface ListDocumentsOptions {
+  readonly clientId?: string;
+}
+
+/** List folders — all, or scoped to one client when `clientId` is provided. */
+export async function listFolders(clientId?: string): Promise<Folder[]> {
+  const db = getServerClient();
+  let query = db.from('folders').select('*').order('path', { ascending: true });
+  if (clientId !== undefined) {
+    query = query.eq('client_id', clientId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(`listFolders: ${error.message}`);
+  return (data ?? []).map(mapFolder);
+}
+
+/**
+ * List documents — global, or scoped to one client via `opts.clientId`.
+ * Ordered newest first (created_at desc).
+ */
+export async function listDocuments(opts?: ListDocumentsOptions): Promise<Document[]> {
+  const db = getServerClient();
+  let query = db.from('documents').select('*').order('created_at', { ascending: false });
+  if (opts?.clientId !== undefined) {
+    query = query.eq('client_id', opts.clientId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(`listDocuments: ${error.message}`);
+  return (data ?? []).map(mapDocument);
+}
+
+/** List documents in a single folder, ordered newest first. */
+export async function getDocumentsByFolder(folderId: string): Promise<Document[]> {
+  const db = getServerClient();
+  const { data, error } = await db
+    .from('documents')
+    .select('*')
+    .eq('folder_id', folderId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`getDocumentsByFolder: ${error.message}`);
+  return (data ?? []).map(mapDocument);
+}
+
+/**
+ * SECURITY-CRITICAL. A folder is visible if it is unrestricted, or it is
+ * restricted AND the requesting role is allowed. Restricted folders are
+ * admin-only (mirror of FileBrowser's `isVisibleToRole`).
+ */
+function isVisibleToRole(folder: Folder, isAdmin: boolean): boolean {
+  if (folder.visibility !== 'restricted') return true;
+  return isAdmin && folder.allowedRoles.includes('admin');
+}
+
+/**
+ * SECURITY-CRITICAL. Omit restricted folders the role may not see. Admins get
+ * the full set; non-admins never receive a restricted folder in the response.
+ */
+export function filterVisibleFolders(
+  folders: readonly Folder[],
+  isAdmin: boolean,
+): Folder[] {
+  return folders.filter((folder) => isVisibleToRole(folder, isAdmin));
+}
+
+/**
+ * SECURITY-CRITICAL. Omit documents that live in a hidden (restricted) folder.
+ * A document is kept when it is unfiled (`folderId === null`) or its folder is
+ * in the set of folders the role may see. Documents in a restricted folder are
+ * never returned to a non-admin.
+ */
+export function filterVisibleDocuments(
+  documents: readonly Document[],
+  visibleFolders: readonly Folder[],
+  isAdmin: boolean,
+): Document[] {
+  if (isAdmin) return [...documents];
+  const visibleFolderIds = new Set(visibleFolders.map((folder) => folder.id));
+  return documents.filter(
+    (doc) => doc.folderId === null || visibleFolderIds.has(doc.folderId),
+  );
+}

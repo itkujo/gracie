@@ -1,0 +1,37 @@
+/**
+ * GET /api/clients/:clientId/operations — Operations tab data.
+ *
+ * Returns the client-scoped tasks (active board) and meetings (for the pipeline
+ * run + transcript history panels). Auth resolves to the mock user via
+ * getRequestUser(); admin-only fields are not part of this payload.
+ */
+import { NextResponse } from 'next/server';
+
+import { getClientDetail, getClientMeetings, getClientTasks } from '@/lib/data/client-detail';
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ clientId: string }> },
+): Promise<NextResponse> {
+  try {
+    const { clientId } = await params;
+    const client = await getClientDetail(clientId);
+    if (client === null) {
+      return NextResponse.json(
+        { error: { code: 'client_not_found', message: 'Client not found' } },
+        { status: 404 },
+      );
+    }
+    const [tasks, meetings] = await Promise.all([
+      getClientTasks(clientId),
+      getClientMeetings(clientId),
+    ]);
+    return NextResponse.json({ tasks, meetings });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json(
+      { error: { code: 'client_operations_failed', message } },
+      { status: 500 },
+    );
+  }
+}

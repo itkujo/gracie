@@ -22,6 +22,8 @@ import {
   MOCK_CLIENT_NOTES,
   MOCK_MASTER_RECORD,
   MOCK_MEETINGS,
+  MOCK_FOLDERS,
+  MOCK_DOCUMENTS,
 } from '../../../apps/web/lib/mock/index.js';
 
 /** Deterministic UUID v5-ish from a stable string (namespaced). */
@@ -102,6 +104,38 @@ async function main(): Promise<void> {
     source: m.source,
   }));
   await upsert('meetings', meetings);
+
+  // 3b. folders (FK: client)
+  const folders = MOCK_FOLDERS.map((f) => ({
+    id: toUuid(f.id),
+    client_id: uid(f.clientId),
+    path: f.path,
+    display_name: f.displayName,
+    visibility: f.visibility,
+    allowed_roles: f.allowedRoles,
+    created_by_user_id: uid(f.createdByUserId),
+    created_at: f.createdAt,
+  }));
+  await upsert('folders', folders);
+
+  // 3c. documents (FK: client, meeting, folder, user)
+  const documents = MOCK_DOCUMENTS.map((d) => ({
+    id: toUuid(d.id),
+    meeting_id: uid(d.meetingId),
+    client_id: uid(d.clientId),
+    folder_id: uid(d.folderId),
+    document_type: d.documentType,
+    source_badge: d.sourceBadge,
+    r2_key: d.r2Key,
+    file_name: d.fileName,
+    file_size: d.fileSize,
+    requires_review: d.requiresReview,
+    status: d.status,
+    uploaded_by_user_id: uid(d.uploadedByUserId),
+    created_at: d.createdAt,
+    updated_at: d.updatedAt,
+  }));
+  await upsert('documents', documents);
 
   // 4. tasks (FK: client, meeting, user)
   const tasks = MOCK_TASKS.map((t) => ({

@@ -1,34 +1,46 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FolderPlus, Upload } from 'lucide-react';
 import type { Document, Folder } from '@gracie/shared';
 
-import { getDocumentsByClient, getFoldersByClient } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import type { Crumb } from '@/components/ui/Breadcrumb';
+import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { FolderTree } from '@/components/FileBrowser/FolderTree';
 import type { FolderNode } from '@/components/FileBrowser/FolderTree';
 import { FileList } from '@/components/FileBrowser/FileList';
 
 /**
  * FileBrowser (docs/08 §8 M11) — two-panel folder tree + file list with a
- * breadcrumb, scoped to one client. Phase 2 / UI-only against the MOCK
- * selectors; Phase 1B swaps the selectors for `GET /api/files?clientId=…`.
+ * breadcrumb, scoped to one client. Folders + documents are fetched from
+ * `GET /api/folders?clientId=…` and `GET /api/documents?clientId=…`.
  *
  * ROLE RULES (docs/08 §1/§7, D14):
  *   - Restricted folders (visibility==='restricted') are OMITTED entirely for
- *     roles not in `allowedRoles` — filtered out here so they never reach the
- *     DOM. Admins see them, marked with a 🔒 in the tree.
+ *     roles not in `allowedRoles`. This is enforced SERVER-SIDE by the APIs,
+ *     which never return restricted folders or their documents to a non-admin.
+ *     The client-side `isVisibleToRole` filter below stays as defense-in-depth.
+ *     Admins see restricted folders, marked with a 🔒 in the tree.
  *   - "Upload Here" / "New Folder" and the per-row action icons appear only when
- *     `canEdit()` (editors); viewers get a read-only browser.
+ *     `canEdit()` (editors); viewers get a read-only browser. File actions
+ *     (download / move / upload / new folder) are visual-only (no MinIO yet).
  */
 export interface FileBrowserProps {
   readonly clientId: string;
+}
+
+interface FoldersResponse {
+  readonly folders: readonly Folder[];
+}
+
+interface DocumentsResponse {
+  readonly documents: readonly Document[];
 }
 
 export function FileBrowser({ clientId }: FileBrowserProps): React.JSX.Element {
@@ -36,12 +48,36 @@ export function FileBrowser({ clientId }: FileBrowserProps): React.JSX.Element {
   const isAdmin = hasRole('admin');
   const editable = canEdit();
 
+  const [allFolders, setAllFolders] = useState<readonly Folder[] | null>(null);
+  const [allDocuments, setAllDocuments] = useState<readonly Document[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
-  // Restricted folders are OMITTED for roles not in allowedRoles (DOM omission).
+  useEffect(() => {
+    let active = true;
+    const query = `?clientId=${encodeURIComponent(clientId)}`;
+    Promise.all([
+      apiClient.get<FoldersResponse>(`/api/folders${query}`),
+      apiClient.get<DocumentsResponse>(`/api/documents${query}`),
+    ])
+      .then(([flds, docs]) => {
+        if (!active) return;
+        setAllFolders(flds.folders);
+        setAllDocuments(docs.documents);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load files');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, [clientId]);
+
+  // Restricted folders are OMITTED server-side for non-admins; this client-side
+  // filter is defense-in-depth (DOM omission), mirroring the API.
   const visibleFolders = useMemo<readonly Folder[]>(
-    () => getFoldersByClient(clientId).filter((folder) => isVisibleToRole(folder, isAdmin)),
-    [clientId, isAdmin],
+    () => (allFolders ?? []).filter((folder) => isVisibleToRole(folder, isAdmin)),
+    [allFolders, isAdmin],
   );
 
   const folderNodes = useMemo<readonly FolderNode[]>(
@@ -57,17 +93,29 @@ export function FileBrowser({ clientId }: FileBrowserProps): React.JSX.Element {
   // Documents in the selected folder. "All files" (null) shows everything the
   // role may see: docs in a visible folder, plus unfiled docs (folderId null).
   const documents = useMemo<readonly Document[]>(() => {
-    const all = getDocumentsByClient(clientId).filter(
+    const all = (allDocuments ?? []).filter(
       (doc) => doc.folderId === null || visibleFolderIds.has(doc.folderId),
     );
     if (selectedFolderId === null) return all;
     return all.filter((doc) => doc.folderId === selectedFolderId);
-  }, [clientId, selectedFolderId, visibleFolderIds]);
+  }, [allDocuments, selectedFolderId, visibleFolderIds]);
 
   const breadcrumbItems = useMemo<readonly Crumb[]>(
     () => buildBreadcrumb(visibleFolders, selectedFolderId, setSelectedFolderId),
     [visibleFolders, selectedFolderId],
   );
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load files" description={error} />;
+  }
+
+  if (allFolders === null || allDocuments === null) {
+    return (
+      <Card className="p-6">
+        <LoadingState label="Loading files…" />
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-0">

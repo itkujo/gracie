@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   Download,
@@ -12,7 +12,8 @@ import {
 import type { Document, DocumentSource, DocumentStatus, DocumentType, Folder } from '@gracie/shared';
 import { DOCUMENT_SOURCES, DOCUMENT_STATUSES, DOCUMENT_TYPES } from '@gracie/shared';
 
-import { MOCK_DOCUMENTS, MOCK_FOLDERS, getClientName, getUserName } from '@/lib/mock';
+import { getClientName, getUserName } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import { formatEasternDate } from '@/lib/format';
@@ -20,7 +21,7 @@ import { docStatusBadge, formatFileSize, sourceBadge } from '@/lib/client-displa
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Table, THead, TBody, TRow, TH, TCell } from '@/components/ui/Table';
-import { EmptyState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 
 /**
  * Module 5 — Global Documents (docs/08 §8 M5, §7).
@@ -31,13 +32,10 @@ import { EmptyState } from '@/components/ui/StateViews';
  *
  * RESTRICTED-FOLDER RULE (docs/08 §1/§7, D14): documents that live in a
  * restricted folder (e.g. the CMS Transcripts folder) are OMITTED entirely for
- * non-admins — filtered out here so they never reach the DOM, mirroring the
- * client FileBrowser's `isVisibleToRole` approach and the eventual server
- * omission.
- *
- * Phase 1B: `MOCK_DOCUMENTS` / `MOCK_FOLDERS` are replaced by
- * `GET /api/files` (already role-filtered server-side); the table, filters, and
- * client-side restricted check stay as a defensive second layer.
+ * non-admins. This is now enforced SERVER-SIDE by `GET /api/documents` (and
+ * `GET /api/folders`), which never returns restricted folders or their documents
+ * to a non-admin. The client-side restricted filter below stays as a defensive
+ * second layer (defense-in-depth), mirroring the client FileBrowser.
  */
 
 type ClientFilter = string | 'all';
@@ -58,34 +56,66 @@ const DOCUMENT_TYPE_LABELS: Readonly<Record<DocumentType, string>> = {
   other: 'Other',
 };
 
+interface DocumentsResponse {
+  readonly documents: readonly Document[];
+}
+
+interface FoldersResponse {
+  readonly folders: readonly Folder[];
+}
+
 export default function DocumentsPage(): React.JSX.Element {
   const { hasRole, canEdit } = useAuth();
   const isAdmin = hasRole('admin');
   const editable = canEdit();
+
+  const [documents, setDocuments] = useState<readonly Document[] | null>(null);
+  const [folders, setFolders] = useState<readonly Folder[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [clientFilter, setClientFilter] = useState<ClientFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
 
-  // Restricted folders → ids omitted for non-admins (DOM omission, like M11).
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiClient.get<DocumentsResponse>('/api/documents'),
+      apiClient.get<FoldersResponse>('/api/folders'),
+    ])
+      .then(([docs, flds]) => {
+        if (!active) return;
+        setDocuments(docs.documents);
+        setFolders(flds.folders);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load documents');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, []);
+
+  // Restricted folders → ids omitted for non-admins (defense-in-depth; the API
+  // already omits restricted folders + their documents server-side).
   const restrictedFolderIds = useMemo<ReadonlySet<string>>(
     () =>
       new Set(
-        MOCK_FOLDERS.filter((folder) => isRestricted(folder)).map((folder) => folder.id),
+        (folders ?? []).filter((folder) => isRestricted(folder)).map((folder) => folder.id),
       ),
-    [],
+    [folders],
   );
 
   // Base set: drop documents in restricted folders unless the user is an admin.
   const visibleDocuments = useMemo<readonly Document[]>(
     () =>
-      MOCK_DOCUMENTS.filter((doc) => {
+      (documents ?? []).filter((doc) => {
         if (doc.folderId === null) return true;
         if (!restrictedFolderIds.has(doc.folderId)) return true;
         return isAdmin;
       }),
-    [restrictedFolderIds, isAdmin],
+    [documents, restrictedFolderIds, isAdmin],
   );
 
   const clientOptions = useMemo<readonly string[]>(
@@ -110,14 +140,19 @@ export default function DocumentsPage(): React.JSX.Element {
     [visibleDocuments, clientFilter, typeFilter, statusFilter, sourceFilter],
   );
 
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load documents" description={error} />;
+  }
+
   return (
     <section className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 style={TYPE.pageTitle}>Documents</h1>
           <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-            {filteredDocuments.length} document{filteredDocuments.length === 1 ? '' : 's'} across
-            all clients.
+            {documents === null
+              ? 'Loading documents…'
+              : `${filteredDocuments.length} document${filteredDocuments.length === 1 ? '' : 's'} across all clients.`}
           </p>
         </div>
         <KnowledgeBaseLink />
@@ -160,7 +195,9 @@ export default function DocumentsPage(): React.JSX.Element {
         />
       </div>
 
-      {filteredDocuments.length === 0 ? (
+      {documents === null ? (
+        <LoadingState label="Loading documents…" />
+      ) : filteredDocuments.length === 0 ? (
         <EmptyState
           title="No matching documents"
           description="No documents match the current filters. Adjust the client, type, status, or source filters to see results."
