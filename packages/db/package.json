@@ -15,7 +15,8 @@
     "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
-    "@gracie/shared": "workspace:*"
+    "@gracie/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.108.0"
   },
   "devDependencies": {
     "@gracie/config": "workspace:*",

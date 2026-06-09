@@ -1,36 +1,39 @@
 /**
- * Supabase BROWSER client — STUB (Phase 1A).
+ * Supabase BROWSER client (Phase 1B).
  *
- * Uses the anon key and is RLS-bound (frontend-safe). Reads only — RLS policies
- * in docs/04 enforce row visibility (defense-in-depth; API middleware is
- * primary). NEVER use the service-role key here (docs/03 §6).
+ * Uses the anon key and is RLS-bound (frontend-safe). RLS policies in docs/04
+ * enforce row visibility (defense-in-depth; API middleware is primary). NEVER
+ * use the service-role key here (docs/03 §6).
  *
- * Phase 1A contract: import is side-effect free and requires NO env vars; the
- * client is created lazily on first call.
- *
- * Phase 1B TODO:
- *   - add `@supabase/supabase-js`
- *   - createClient<Database>(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)
- *   - attach the Logto JWT so auth_role()/auth_uid() resolve in RLS
+ * Import is side-effect free; env is read lazily on first call. An optional
+ * Logto access token can be supplied so `auth_role()`/`auth_uid()` resolve in
+ * RLS once auth is wired.
  */
-import type { Database } from './types.js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-/** Shape returned once the real anon client lands (Phase 1B). */
-export type BrowserClient = {
-  readonly __database: Database;
-};
+import { getBrowserConfig } from './config.js';
+import type { Database } from './database.types.js';
+
+export type BrowserClient = SupabaseClient<Database>;
+
+let cached: BrowserClient | undefined;
 
 /**
- * Lazily resolve the anon (RLS-bound) Supabase client.
+ * Resolve the memoized anon (RLS-bound) Supabase client.
  *
- * Phase 1A: throws — no SDK/env wired yet. Locks the signature only.
- *
- * Phase 1B: memoize a single anon client (module-level cache) created from
- * NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY, with the Logto JWT
- * attached so RLS resolves auth_role()/auth_uid().
+ * @param accessToken Optional Logto JWT to attach as the Authorization bearer
+ *        so RLS policies see the user's role/sub claims.
  */
-export function getBrowserClient(): BrowserClient {
-  throw new Error(
-    'Supabase browser client is not implemented in Phase 1A. Wire @supabase/supabase-js + env in Phase 1B.',
-  );
+export function getBrowserClient(accessToken?: string): BrowserClient {
+  if (cached !== undefined && accessToken === undefined) return cached;
+  const { url, anonKey } = getBrowserConfig();
+  const client = createClient<Database>(url, anonKey, {
+    auth: { persistSession: false },
+    global:
+      accessToken !== undefined
+        ? { headers: { Authorization: `Bearer ${accessToken}` } }
+        : {},
+  });
+  if (accessToken === undefined) cached = client;
+  return client;
 }
