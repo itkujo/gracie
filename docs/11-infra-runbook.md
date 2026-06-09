@@ -36,10 +36,23 @@
 ### Remaining infra TODO
 - [ ] Deploy `apps/web` + `apps/worker` into Coolify (gracie project).
 - [ ] Configure Logto application + Microsoft Entra connector + roles.
-- [ ] Cloudflare Tunnel for team-facing access (app + Logto login).
 - [ ] Redis + n8n (later phases).
 - [ ] Create a scoped MinIO access key (replace root creds in app).
 - [ ] Backups: Postgres dumps + MinIO sync off-site (Phase 10).
+
+### Public access (ingress) — established
+Domain `graceandassociates.com` on Cloudflare DNS; an existing **separate nginx
+box** has 80/443 port-forwarded and reverse-proxies to internal hosts.
+
+Hostnames for GA App (Cloudflare-proxied A records → public IP → nginx → gracie VM):
+- `gracie.graceandassociates.com` → VM `:3000` (app — pending deploy, 502 until then)
+- `auth.gracie.graceandassociates.com` → VM `:3001` (Logto sign-in)
+- `auth-admin.gracie.graceandassociates.com` → VM `:3002` (Logto admin console)
+
+VM exposes the Coolify-internal services for the nginx box / dev via **socat
+proxies** (`restart=unless-stopped`): Logto 3001/3002, Supabase Kong 8001,
+MinIO 9000. Firewall (ufw) allows 22/3000/3001/3002/8001/9000 on the LAN.
+nginx server blocks `proxy_pass http://10.200.200.131:<port>` per hostname.
 
 ---
 
