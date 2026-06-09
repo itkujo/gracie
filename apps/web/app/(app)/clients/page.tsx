@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, CalendarClock, Search } from 'lucide-react';
 import type { Client } from '@gracie/shared';
 
-import { MOCK_CLIENTS } from '@/lib/mock';
+import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth';
 import { TYPE } from '@/lib/typography';
 import {
@@ -17,43 +17,69 @@ import {
 import { formatEasternDate } from '@/lib/format';
 import { ClientAvatar } from '@/components/ClientAvatar';
 import { Card } from '@/components/ui/Card';
-import { EmptyState } from '@/components/ui/StateViews';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { CLIENT_CADENCES } from '@gracie/shared';
 import type { ClientCadence } from '@gracie/shared';
 
 /**
- * Module 2 — Client List (docs/08 §8 M2, §9). Grid of client cards from the
- * MOCK selector with name + cadence search/filter. The fee-tier dot is rendered
- * ONLY for admins (docs/08 §7 — fee tier is admin-only data). Health score color
- * follows the M2 band (>90 emerald / 70–90 amber / <70 red).
- *
- * Phase 1B: `MOCK_CLIENTS` is replaced by a fetch to `GET /api/clients`; the
- * card markup and role gating stay unchanged.
+ * Module 2 — Client List (docs/08 §8 M2, §9). Grid of client cards fetched from
+ * `GET /api/clients` (real Supabase data). The fee-tier dot renders ONLY for
+ * admins (docs/08 §7 — fee tier is admin-only; the API also omits the value for
+ * non-admins). Health score color follows the M2 band (>90 emerald / 70–90
+ * amber / <70 red).
  */
 type CadenceFilter = ClientCadence | 'all';
+
+interface ClientsResponse {
+  readonly clients: readonly Client[];
+}
 
 export default function ClientsPage(): React.JSX.Element {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('admin');
 
+  const [clients, setClients] = useState<readonly Client[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
   const [cadence, setCadence] = useState<CadenceFilter>('all');
 
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .get<ClientsResponse>('/api/clients')
+      .then((data) => {
+        if (active) setClients(data.clients);
+      })
+      .catch((e: unknown) => {
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load clients');
+      });
+    return (): void => {
+      active = false;
+    };
+  }, []);
+
   const filtered = useMemo<readonly Client[]>(() => {
+    if (clients === null) return [];
     const needle = query.trim().toLowerCase();
-    return MOCK_CLIENTS.filter((client) => {
+    return clients.filter((client) => {
       const matchesName = needle === '' || client.name.toLowerCase().includes(needle);
       const matchesCadence = cadence === 'all' || client.cadence === cadence;
       return matchesName && matchesCadence;
     });
-  }, [query, cadence]);
+  }, [clients, query, cadence]);
+
+  if (error !== null) {
+    return <ErrorState title="Couldn’t load clients" description={error} />;
+  }
 
   return (
     <section className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h1 style={TYPE.pageTitle}>Clients</h1>
         <p style={{ ...TYPE.secondary, color: 'var(--text-secondary)' }}>
-          {MOCK_CLIENTS.length} active client relationships.
+          {clients === null
+            ? 'Loading client relationships…'
+            : `${clients.length} active client relationships.`}
         </p>
       </header>
 
@@ -94,7 +120,9 @@ export default function ClientsPage(): React.JSX.Element {
         </label>
       </div>
 
-      {filtered.length === 0 ? (
+      {clients === null ? (
+        <LoadingState label="Loading clients…" />
+      ) : filtered.length === 0 ? (
         <EmptyState
           title="No matching clients"
           description="No clients match the current search and cadence filter. Adjust your filters to see results."
